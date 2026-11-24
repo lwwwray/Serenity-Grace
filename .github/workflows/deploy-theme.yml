@@ -72,13 +72,28 @@ jobs:
           fi
 
           echo "Running Halo theme ${ACTION}..."
-          HTTP_CODE=$(curl -sS -o /tmp/halo-resp.txt -w "%{http_code}" \
-            -X POST "${ENDPOINT}" \
-            -H "Authorization: Bearer ${HALO_TOKEN}" \
-            -H "Accept: application/json" \
-            -F "file=@dist/theme-Serenity.zip")
+          SUCCESS=0
+          for attempt in 1 2 3; do
+            echo "Attempt ${attempt}/3..."
+            HTTP_CODE=$(curl -sS --http1.1 --connect-timeout 20 --max-time 120 \
+              -o /tmp/halo-resp.txt -w "%{http_code}" \
+              -X POST "${ENDPOINT}" \
+              -H "Authorization: Bearer ${HALO_TOKEN}" \
+              -H "Accept: application/json" \
+              -F "file=@dist/theme-Serenity.zip" || echo "000")
 
-          echo "${ACTION} HTTP status: ${HTTP_CODE}"
-          cat /tmp/halo-resp.txt || true
-          echo ""
-          test "${HTTP_CODE}" -ge 200 -a "${HTTP_CODE}" -lt 300
+            echo "${ACTION} HTTP status: ${HTTP_CODE}"
+            cat /tmp/halo-resp.txt || true
+            echo ""
+
+            if [ "${HTTP_CODE}" -ge 200 ] && [ "${HTTP_CODE}" -lt 300 ]; then
+              SUCCESS=1
+              break
+            fi
+
+            if [ "${attempt}" -lt 3 ]; then
+              echo "Retrying in 5s..."
+              sleep 5
+            fi
+          done
+          test "${SUCCESS}" -eq 1

@@ -57,25 +57,28 @@ jobs:
           BASE_URL="${HALO_URL%/}"
           THEME_NAME="theme-Serenity"
 
-          HTTP_CODE=$(curl -sS -o /tmp/halo-resp.txt -w "%{http_code}" \
-            -X POST "${BASE_URL}/apis/api.console.halo.run/v1alpha1/themes/${THEME_NAME}/upgrade" \
+          EXIST_CODE=$(curl -sS -o /dev/null -w "%{http_code}" \
             -H "Authorization: Bearer ${HALO_TOKEN}" \
+            -H "Accept: application/json" \
+            "${BASE_URL}/apis/theme.halo.run/v1alpha1/themes/${THEME_NAME}")
+          echo "Theme existence check HTTP status: ${EXIST_CODE}"
+
+          if [ "${EXIST_CODE}" = "200" ]; then
+            ENDPOINT="${BASE_URL}/apis/api.console.halo.run/v1alpha1/themes/${THEME_NAME}/upgrade"
+            ACTION="upgrade"
+          else
+            ENDPOINT="${BASE_URL}/apis/api.console.halo.run/v1alpha1/themes/install"
+            ACTION="install"
+          fi
+
+          echo "Running Halo theme ${ACTION}..."
+          HTTP_CODE=$(curl -sS -o /tmp/halo-resp.txt -w "%{http_code}" \
+            -X POST "${ENDPOINT}" \
+            -H "Authorization: Bearer ${HALO_TOKEN}" \
+            -H "Accept: application/json" \
             -F "file=@dist/theme-Serenity.zip")
 
-          echo "Upgrade HTTP status: ${HTTP_CODE}"
+          echo "${ACTION} HTTP status: ${HTTP_CODE}"
           cat /tmp/halo-resp.txt || true
           echo ""
-
-          if [ "${HTTP_CODE}" = "404" ]; then
-            echo "Theme not installed yet; installing for the first time..."
-            INSTALL_CODE=$(curl -sS -o /tmp/halo-install.txt -w "%{http_code}" \
-              -X POST "${BASE_URL}/apis/api.console.halo.run/v1alpha1/themes/install" \
-              -H "Authorization: Bearer ${HALO_TOKEN}" \
-              -F "file=@dist/theme-Serenity.zip")
-            echo "Install HTTP status: ${INSTALL_CODE}"
-            cat /tmp/halo-install.txt || true
-            echo ""
-            test "${INSTALL_CODE}" -ge 200 -a "${INSTALL_CODE}" -lt 300
-          else
-            test "${HTTP_CODE}" -ge 200 -a "${HTTP_CODE}" -lt 300
-          fi
+          test "${HTTP_CODE}" -ge 200 -a "${HTTP_CODE}" -lt 300

@@ -1,0 +1,81 @@
+name: Deploy Serenity-Grace Theme to Halo
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - 'LICENSE'
+      - '.gitignore'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout theme repository
+        uses: actions/checkout@v4
+
+      - name: Tag theme version with commit SHA
+        run: |
+          python3 - <<'PY'
+          import os, re, pathlib
+          short_sha = os.environ["GITHUB_SHA"][:7]
+          p = pathlib.Path("theme.yaml")
+          text = p.read_text(encoding="utf-8")
+          def repl(m):
+              base = m.group(2).split("-")[0]
+              return f"{m.group(1)}{base}-{short_sha}"
+          new_text, count = re.subn(r"^(\s*version:\s*)([^\s#]+)", repl, text, count=1, flags=re.M)
+          assert count == 1, "Failed to find version field in theme.yaml"
+          p.write_text(new_text, encoding="utf-8")
+          PY
+          grep -n "version:" theme.yaml
+
+      - name: Package Halo theme zip
+        run: |
+          mkdir -p dist
+          zip -r dist/theme-Serenity.zip theme.yaml settings.yaml templates LICENSE README.md
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: theme-Serenity-zip
+          path: dist/theme-Serenity.zip
+          retention-days: 7
+
+      - name: Hot-upgrade (or install) theme on Halo
+        env:
+          HALO_URL: ${{ secrets.HALO_URL }}
+          HALO_TOKEN: ${{ secrets.HALO_TOKEN }}
+        run: |
+          set -euo pipefail
+          BASE_URL="${HALO_URL%/}"
+          THEME_NAME="theme-Serenity"
+
+          HTTP_CODE=$(curl -sS -o /tmp/halo-resp.txt -w "%{http_code}" \
+            -X POST "${BASE_URL}/apis/api.console.halo.run/v1alpha1/themes/${THEME_NAME}/upgrade" \
+            -H "Authorization: Bearer ${HALO_TOKEN}" \
+            -F "file=@dist/theme-Serenity.zip")
+
+          echo "Upgrade HTTP status: ${HTTP_CODE}"
+          cat /tmp/halo-resp.txt || true
+          echo ""
+
+          if [ "${HTTP_CODE}" = "404" ]; then
+            echo "Theme not installed yet; installing for the first time..."
+            INSTALL_CODE=$(curl -sS -o /tmp/halo-install.txt -w "%{http_code}" \
+              -X POST "${BASE_URL}/apis/api.console.halo.run/v1alpha1/themes/install" \
+              -H "Authorization: Bearer ${HALO_TOKEN}" \
+              -F "file=@dist/theme-Serenity.zip")
+            echo "Install HTTP status: ${INSTALL_CODE}"
+            cat /tmp/halo-install.txt || true
+            echo ""
+            test "${INSTALL_CODE}" -ge 200 -a "${INSTALL_CODE}" -lt 300
+          else
+            test "${HTTP_CODE}" -ge 200 -a "${HTTP_CODE}" -lt 300
+          fi
